@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16202b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Locatie Scanner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one narrow column, scan station on top, mapping file and scan log below */
+:root {
+  --bg: #eef1f4;
+  --surface: #ffffff;
+  --fg: #16202b;
+  --muted: #5b6876;
+  --line: #d3dae2;
+  --ean: #1f5fbf;
+  --ean-soft: #e3ecfa;
+  --loc: #f2b705;
+  --loc-ink: #4a3600;
+  --loc-soft: #fdf3d2;
+  --ok: #1d7a46;
+  --bad: #b3261e;
+  --bad-soft: #fbe7e5;
+  --f-display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #10151b; --surface: #19212a; --fg: #e6ecf2; --muted: #95a2b0; --line: #2c3743;
+  --ean: #7fb0ff; --ean-soft: #1b2a40; --loc: #f2b705; --loc-ink: #2a1f00; --loc-soft: #2f2710;
+  --ok: #5fd08f; --bad: #ff8a80; --bad-soft: #3a1d1b; color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #10151b; --surface: #19212a; --fg: #e6ecf2; --muted: #95a2b0; --line: #2c3743;
+  --ean: #7fb0ff; --ean-soft: #1b2a40; --loc: #f2b705; --loc-ink: #2a1f00; --loc-soft: #2f2710;
+  --ok: #5fd08f; --bad: #ff8a80; --bad-soft: #3a1d1b; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { color-scheme: light; }
+@media (prefers-color-scheme: dark) { html { color-scheme: dark; } }
+body { margin: 0; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--fg); font-family: var(--f-body); font-size: 15px; line-height: 1.45; }
+.wrap { max-width: 760px; margin: 0 auto; padding-block: 20px 48px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 18px; }
+header { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+h1 { font-family: var(--f-display); font-weight: 700; font-size: 2rem; letter-spacing: .01em; margin: 0; line-height: 1; text-wrap: balance; }
+h2 { font-family: var(--f-display); font-weight: 600; font-size: 1.25rem; letter-spacing: .03em; text-transform: uppercase; margin: 0; }
+.sub { color: var(--muted); margin: 4px 0 0; font-size: .9rem; }
+.mono { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+button, .btn { font: inherit; font-weight: 600; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); padding: 10px 14px; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; min-height: 44px; }
+button:hover, .btn:hover { border-color: var(--muted); }
+button:focus-visible, .btn:focus-within, input:focus-visible, select:focus-visible { outline: 3px solid var(--ean); outline-offset: 2px; }
+button:disabled { opacity: .45; cursor: default; }
+.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.danger { color: var(--bad); }
+
+/* scan station */
+.station { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.steps { display: grid; grid-template-columns: 1fr 1fr; }
+.step { padding: 12px 16px; font-family: var(--f-display); font-weight: 600; font-size: 1.05rem; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.step b { font-size: 1.5rem; }
+.step.on.ean { background: var(--ean); color: #fff; border-color: var(--ean); }
+.step.on.loc { background: var(--loc); color: var(--loc-ink); border-color: var(--loc); }
+[data-theme="dark"] .step.on.ean { color: #0c1626; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .step.on.ean { color: #0c1626; } }
+.scanbody { padding: 18px 16px; display: flex; flex-direction: column; gap: 12px; }
+.prompt { font-family: var(--f-display); font-weight: 700; font-size: 1.9rem; line-height: 1.05; margin: 0; }
+.pending { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: .95rem; padding: 8px 12px; border-radius: 8px; background: var(--ean-soft); }
+.pending .mono { font-weight: 600; font-size: 1.05rem; }
+.pending .art { color: var(--muted); }
+#scan { width: 100%; font-family: var(--f-mono); font-size: 1.5rem; padding: 14px 14px; border-radius: 10px; border: 2px solid var(--ean); background: var(--bg); color: var(--fg); min-width: 0; }
+.mode-loc #scan { border-color: var(--loc); }
+.tools { display: flex; gap: 8px; flex-wrap: wrap; }
+.msg { padding: 10px 12px; border-radius: 8px; font-size: .95rem; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.msg.bad { background: var(--bad-soft); color: var(--bad); }
+.msg.ok { color: var(--ok); padding-block: 2px; }
+.msg button { min-height: 36px; padding: 6px 10px; }
+.toggle { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: .9rem; cursor: pointer; }
+.toggle input { width: 18px; height: 18px; }
+
+/* panels */
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.panel-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.chip { font-size: .8rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.chip.ok { color: var(--ok); border-color: currentColor; }
+.chip.bad { color: var(--bad); border-color: currentColor; }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+label.field { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; color: var(--muted); min-width: 0; }
+select, .field input { font: inherit; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); min-height: 44px; width: 100%; }
+.hint { color: var(--muted); font-size: .88rem; margin: 0; }
+.cam { position: relative; border-radius: 10px; overflow: hidden; background: #000; max-height: 46vh; }
+.cam video { display: block; width: 100%; max-height: 46vh; object-fit: cover; }
+.cam .aim { position: absolute; left: 10%; right: 10%; top: 50%; height: 0; border-top: 2px solid var(--loc); box-shadow: 0 0 0 9999px rgba(0,0,0,.25); }
+.mode-loc .cam .aim, .cam .aim { transition: border-color .2s; }
+.station:not(.mode-loc) .cam .aim { border-top-color: var(--ean); }
+.cam.hit { outline: 4px solid var(--ok); outline-offset: -4px; }
+.file-btn input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
+/* log */
+.tablewrap { overflow-x: auto; margin: 0 -16px; }
+table { width: 100%; border-collapse: collapse; font-size: .95rem; }
+th { text-align: left; font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; padding: 6px 16px; border-bottom: 1px solid var(--line); }
+td { padding: 9px 16px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+td.n { color: var(--muted); width: 1%; }
+td .loc { display: inline-block; background: var(--loc-soft); border-left: 4px solid var(--loc); padding: 2px 8px; border-radius: 4px; font-weight: 600; }
+td .ean { color: var(--muted); font-size: .82rem; }
+td .art { font-weight: 600; }
+td .miss { color: var(--bad); font-size: .82rem; font-weight: 600; }
+td.x { width: 1%; text-align: right; }
+td.x button { min-height: 36px; padding: 4px 10px; color: var(--muted); }
+tr.example td { color: var(--muted); opacity: .75; }
+.empty { color: var(--muted); font-size: .92rem; margin: 0; }
+.confirm { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: var(--bad-soft); color: var(--bad); padding: 10px 12px; border-radius: 8px; }
+.summary { display: flex; gap: 18px; flex-wrap: wrap; font-size: .92rem; color: var(--muted); }
+.summary strong { color: var(--fg); font-family: var(--f-mono); }
+@media (prefers-reduced-motion: no-preference) { .flash { animation: flash .5s ease-out; } }
+@keyframes flash { from { background: var(--loc-soft); } to { background: transparent; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Locatie Scanner</h1>
+      <p class="sub">Scan een EAN, daarna de locatie. Herhaal. Exporteer naar Excel.</p>
+    </div>
+    <button id="exportBtn" class="primary" type="button">Exporteer Excel</button>
+  </header>
+
+  <section class="station" id="station" aria-live="polite">
+    <div class="steps">
+      <div class="step ean" id="stepEan"><b>1</b> EAN</div>
+      <div class="step loc" id="stepLoc"><b>2</b> Locatie</div>
+    </div>
+    <div class="scanbody">
+      <p class="prompt" id="prompt">Scan een EAN</p>
+      <div class="pending" id="pending" hidden>
+        <span>EAN</span><span class="mono" id="pendingEan"></span><span class="art" id="pendingArt"></span>
+      </div>
+      <div class="cam" id="cam" hidden>
+        <video id="camVideo" playsinline muted></video>
+        <div class="aim"></div>
+      </div>
+      <form id="scanForm" autocomplete="off">
+        <input id="scan" type="text" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Scan of typ en druk Enter" aria-label="Scancode">
+      </form>
+      <div id="msg" class="msg" hidden></div>
+      <div class="tools">
+        <button id="camBtn" type="button">Scan met camera</button>
+        <button id="undoBtn" type="button">Laatste scan ongedaan maken</button>
+      </div>
+      <label class="toggle" for="noKb"><input id="noKb" type="checkbox"> Schermtoetsenbord verbergen (handscanner gebruiken)</label>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Artikelbestand</h2>
+      <span class="chip" id="mapChip">Niet geladen</span>
+    </div>
+    <p class="hint" id="mapHint">Optioneel. Laad een Excel- of CSV-bestand met EAN's en artikelnummers. Dan staat in de export het artikelnummer in plaats van de EAN.</p>
+    <div class="tools">
+      <label class="btn file-btn" for="mapFile">Bestand kiezen
+        <input id="mapFile" type="file" accept=".xlsx,.xls,.csv,.ods,text/csv">
+      </label>
+      <button id="mapClear" type="button" class="danger" hidden>Bestand verwijderen</button>
+    </div>
+    <div id="mapCols" hidden>
+      <div class="cols">
+        <label class="field" for="colEan">Kolom met EAN
+          <select id="colEan"></select>
+        </label>
+        <label class="field" for="colArt">Kolom met artikelnummer
+          <select id="colArt"></select>
+        </label>
+      </div>
+      <div class="tools" style="margin-top:10px">
+        <button id="mapApply" type="button" class="primary">Koppelen</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Gescand</h2>
+      <div class="summary">
+        <span><strong id="cnt">0</strong> regels</span>
+        <span id="missWrap" hidden><strong id="missCnt">0</strong> niet gevonden</span>
+      </div>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>#</th><th id="thArt">EAN</th><th>Locatie</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p class="empty" id="empty">Voorbeeld hierboven. Je eigen scans verschijnen hier, de nieuwste bovenaan. Ze blijven op dit apparaat bewaard tot je de lijst leegmaakt.</p>
+    <div class="tools" id="clearWrap" hidden>
+      <button id="clearBtn" type="button" class="danger">Lijst leegmaken</button>
+    </div>
+    <div class="confirm" id="confirm" hidden>
+      <span>Alle scans verwijderen? Dit kan niet ongedaan worden.</span>
+      <button id="confirmYes" type="button" class="danger">Ja, verwijderen</button>
+      <button id="confirmNo" type="button">Annuleren</button>
+    </div>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script>
+(function () {
+  const KEY_SCANS = "ls.scans.v1", KEY_PENDING = "ls.pending.v1", KEY_MAP = "ls.map.v1", KEY_KB = "ls.nokb.v1";
+  const $ = id => document.getElementById(id);
+
+  function load(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
+  function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+
+  let scans = load(KEY_SCANS, []);          // [{ean, loc, t}]
+  let pending = load(KEY_PENDING, null);    // ean waiting for a location
+  let mapping = load(KEY_MAP, null);        // {name, count, map:{key: art}}
+  let sheetRows = null;
+
+  // EAN-13, UPC-A and GTIN-14 of the same product differ only in leading zeros
+  const eanKey = v => String(v).replace(/\D/g, "").replace(/^0+/, "");
+  const looksLikeEan = v => /^\d{8}$|^\d{12,14}$/.test(v);
+  const artFor = ean => mapping ? (mapping.map[eanKey(ean)] ?? null) : null;
+
+  // ---------- sound ----------
+  let ac = null;
+  function beep(ok) {
+    try {
+      ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+      const tones = ok ? [[1320, 0, .08]] : [[300, 0, .14], [300, .2, .14]];
+      tones.forEach(([f, start, dur]) => {
+        const o = ac.createOscillator(), g = ac.createGain();
+        o.frequency.value = f; o.type = "square"; g.gain.value = .06;
+        o.connect(g); g.connect(ac.destination);
+        o.start(ac.currentTime + start); o.stop(ac.currentTime + start + dur);
+      });
+      if (navigator.vibrate) navigator.vibrate(ok ? 40 : [80, 60, 80]);
+    } catch (e) {}
+  }
+
+  // ---------- messages ----------
+  function showMsg(text, kind, action) {
+    const m = $("msg");
+    m.className = "msg " + kind;
+    m.textContent = text;
+    if (action) {
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = action.label;
+      b.addEventListener("click", () => { action.run(); focusScan(); });
+      m.appendChild(b);
+    }
+    m.hidden = false;
+  }
+  function clearMsg() { $("msg").hidden = true; }
+
+  // ---------- scanning ----------
+  function handleCode(raw, force) {
+    const code = String(raw).trim();
+    if (!code) return;
+    if (!pending) {
+      if (!force && !looksLikeEan(code)) {
+        beep(false);
+        showMsg(`"${code}" lijkt geen EAN. Scan eerst een EAN.`, "bad", { label: "Toch als EAN gebruiken", run: () => handleCode(code, true) });
+        return;
+      }
+      pending = code;
+      save(KEY_PENDING, pending);
+      beep(true);
+      clearMsg();
+    } else {
+      if (!force && (looksLikeEan(code) && code.length >= 12 || artFor(code) !== null)) {
+        beep(false);
+        showMsg(`"${code}" lijkt een EAN, geen locatie. Scan de locatie van ${pending}.`, "bad", {
+          label: "Toch als locatie gebruiken", run: () => handleCode(code, true)
+        });
+        return;
+      }
+      scans.push({ ean: pending, loc: code, t: Date.now() });
+      pending = null;
+      save(KEY_SCANS, scans); save(KEY_PENDING, null);
+      beep(true);
+      showMsg(`Opgeslagen: ${scans[scans.length - 1].ean} → ${code}`, "ok");
+      render(true);
+      return;
+    }
+    render(false);
+  }
+
+  $("scanForm").addEventListener("submit", e => {
+    e.preventDefault();
+    const v = $("scan").value;
+    $("scan").value = "";
+    handleCode(v, false);
+  });
+
+  // a hardware scanner types into whatever has focus; pull stray keystrokes into the scan field
+  document.addEventListener("keydown", e => {
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return;
+    $("scan").focus();
+  });
+  function focusScan() { try { $("scan").focus({ preventScroll: true }); } catch (e) {} }
+
+  $("undoBtn").addEventListener("click", () => {
+    if (pending) { pending = null; save(KEY_PENDING, null); showMsg("EAN verwijderd. Scan opnieuw een EAN.", "ok"); }
+    else if (scans.length) {
+      const last = scans.pop();
+      pending = last.ean;
+      save(KEY_SCANS, scans); save(KEY_PENDING, pending);
+      showMsg(`Locatie ${last.loc} verwijderd. Scan opnieuw de locatie.`, "ok");
+    }
+    render(false); focusScan();
+  });
+
+  // keyboard toggle
+  $("noKb").checked = !!load(KEY_KB, false);
+  function applyKb() { $("scan").setAttribute("inputmode", $("noKb").checked ? "none" : "text"); }
+  $("noKb").addEventListener("change", () => { save(KEY_KB, $("noKb").checked); applyKb(); focusScan(); });
+  applyKb();
+
+  // ---------- live camera scan ----------
+  let stream = null, timer = null, detector = null, zx = null, lastCode = "", lastAt = 0;
+  const cam = $("cam"), video = $("camVideo"), grab = document.createElement("canvas");
+  if ("BarcodeDetector" in window) { try { detector = new BarcodeDetector(); } catch (e) {} }
+  if (window.ZXing) {
+    const hints = new Map();
+    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+    zx = new ZXing.MultiFormatReader();
+    zx.setHints(hints);
+  }
+  async function readFrame() {
+    const w = video.videoWidth, h = video.videoHeight;
+    if (!w || !h) return null;
+    const scale = Math.min(1, 1280 / Math.max(w, h));
+    grab.width = Math.round(w * scale); grab.height = Math.round(h * scale);
+    grab.getContext("2d", { willReadFrequently: true }).drawImage(video, 0, 0, grab.width, grab.height);
+    if (detector) {
+      try { const f = await detector.detect(grab); return f.length ? f[0].rawValue : null; } catch (e) {}
+    }
+    if (zx) {
+      try {
+        const lum = new ZXing.HTMLCanvasElementLuminanceSource(grab);
+        return zx.decode(new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum))).getText();
+      } catch (e) { return null; }
+    }
+    return null;
+  }
+  async function tick() {
+    if (!stream) return;
+    const code = await readFrame();
+    const now = Date.now();
+    // short pause after every hit, longer before the same code counts again
+    if (code && now - lastAt > 1200 && (code !== lastCode || now - lastAt > 3000)) {
+      lastCode = code; lastAt = now;
+      cam.classList.add("hit"); setTimeout(() => cam.classList.remove("hit"), 300);
+      handleCode(code, false);
+    }
+    if (stream) timer = setTimeout(tick, 120);
+  }
+  async function startCam() {
+    if (!detector && !zx) { showMsg("De scanmodule is niet geladen. Controleer de internetverbinding en herlaad de pagina.", "bad"); return; }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+    } catch (e) {
+      stream = null;
+      showMsg("Geen toegang tot de camera. Sta cameratoegang toe in je browser en probeer het opnieuw.", "bad");
+      return;
+    }
+    video.srcObject = stream;
+    try { await video.play(); } catch (e) {}
+    cam.hidden = false;
+    $("camBtn").textContent = "Camera stoppen";
+    tick();
+  }
+  function stopCam() {
+    clearTimeout(timer);
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = null; video.srcObject = null;
+    cam.hidden = true;
+    $("camBtn").textContent = "Scan met camera";
+  }
+  $("camBtn").addEventListener("click", () => { if (ac === null) beep(true); stream ? stopCam() : startCam(); });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState !== "visible") stopCam(); });
+
+  // ---------- mapping file ----------
+  function guess(headers, words) {
+    const i = headers.findIndex(h => words.some(w => String(h).toLowerCase().includes(w)));
+    return i < 0 ? 0 : i;
+  }
+  $("mapFile").addEventListener("change", async e => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    if (!window.XLSX) { showMapHint("De Excel-module is niet geladen. Controleer de internetverbinding en herlaad de pagina.", true); return; }
+    try {
+      const wb = XLSX.read(await f.arrayBuffer(), { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      sheetRows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
+      if (!sheetRows.length) { showMapHint("Het bestand is leeg.", true); return; }
+      sheetRows.fileName = f.name;
+      const headers = sheetRows[0].map((h, i) => String(h).trim() || `Kolom ${XLSX.utils.encode_col(i)}`);
+      ["colEan", "colArt"].forEach(id => {
+        const s = $(id); s.innerHTML = "";
+        headers.forEach((h, i) => {
+          const sample = sheetRows[1] ? String(sheetRows[1][i] ?? "") : "";
+          const o = document.createElement("option");
+          o.value = i; o.textContent = sample ? `${h}  (bv. ${sample.slice(0, 20)})` : h;
+          s.appendChild(o);
+        });
+      });
+      $("colEan").value = guess(headers, ["ean", "barcode", "gtin"]);
+      let ai = guess(headers, ["artikel", "art.", "artnr", "sku", "item"]);
+      if (ai === +$("colEan").value && headers.length > 1) ai = ai === 0 ? 1 : 0;
+      $("colArt").value = ai;
+      $("mapCols").hidden = false;
+      showMapHint(`${f.name}: ${sheetRows.length - 1} regels gevonden. Controleer de kolommen en klik op Koppelen.`);
+    } catch (err) {
+      showMapHint("Dit bestand kon niet worden gelezen. Gebruik .xlsx, .xls of .csv.", true);
+    }
+  });
+  function cellText(v) {
+    if (typeof v === "number") return Number.isInteger(v) ? v.toFixed(0) : String(v);
+    return String(v ?? "").trim();
+  }
+  $("mapApply").addEventListener("click", () => {
+    if (!sheetRows) return;
+    const ce = +$("colEan").value, ca = +$("colArt").value;
+    const map = {};
+    let n = 0;
+    for (let r = 1; r < sheetRows.length; r++) {
+      const k = eanKey(cellText(sheetRows[r][ce]));
+      const a = cellText(sheetRows[r][ca]);
+      if (k && a) { map[k] = a; n++; }
+    }
+    if (!n) { showMapHint("Geen EAN's gevonden in die kolom. Kies een andere kolom.", true); return; }
+    mapping = { name: sheetRows.fileName, count: n, map };
+    save(KEY_MAP, mapping);
+    sheetRows = null;
+    $("mapCols").hidden = true;
+    render(false); focusScan();
+  });
+  $("mapClear").addEventListener("click", () => {
+    mapping = null;
+    try { localStorage.removeItem(KEY_MAP); } catch (e) {}
+    render(false);
+  });
+  function showMapHint(t, bad) { $("mapHint").textContent = t; $("mapHint").style.color = bad ? "var(--bad)" : ""; }
+
+  // ---------- clear ----------
+  $("clearBtn").addEventListener("click", () => { $("confirm").hidden = false; $("clearWrap").hidden = true; });
+  $("confirmNo").addEventListener("click", () => { $("confirm").hidden = true; render(false); });
+  $("confirmYes").addEventListener("click", () => {
+    scans = []; pending = null;
+    save(KEY_SCANS, scans); save(KEY_PENDING, null);
+    $("confirm").hidden = true; clearMsg(); render(false); focusScan();
+  });
+
+  // ---------- export ----------
+  $("exportBtn").addEventListener("click", async () => {
+    if (!scans.length) { showMsg("Er is nog niets gescand om te exporteren.", "bad"); return; }
+    if (!window.XLSX) { showMsg("De Excel-module is niet geladen. Controleer de internetverbinding en herlaad de pagina.", "bad"); return; }
+    const head = mapping ? ["Artikelnummer", "Locatie"] : ["EAN", "Locatie"];
+    const aoa = [head].concat(scans.map(s => {
+      if (!mapping) return [String(s.ean), String(s.loc)];
+      const a = artFor(s.ean);
+      return [a !== null ? String(a) : `${s.ean} (niet gevonden)`, String(s.loc)];
+    }));
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = [{ wch: 24 }, { wch: 16 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Scans");
+    const d = new Date(), p = n => String(n).padStart(2, "0");
+    const filename = `scans-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.xlsx`;
+    XLSX.writeFile(wb, filename);
+    showMsg(`Geëxporteerd: ${filename} (${scans.length} regels)`, "ok");
+  });
+
+  // ---------- render ----------
+  function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+  function render(flash) {
+    const loc = !!pending;
+    $("station").classList.toggle("mode-loc", loc);
+    $("stepEan").classList.toggle("on", !loc);
+    $("stepLoc").classList.toggle("on", loc);
+    $("prompt").textContent = loc ? "Scan de locatie" : "Scan een EAN";
+    $("pending").hidden = !loc;
+    if (loc) {
+      $("pendingEan").textContent = pending;
+      const a = artFor(pending);
+      $("pendingArt").textContent = mapping ? (a !== null ? `Artikel ${a}` : "Niet in artikelbestand") : "";
+    }
+    $("undoBtn").disabled = !pending && !scans.length;
+
+    $("mapChip").textContent = mapping ? `${mapping.count} artikelen` : "Niet geladen";
+    $("mapChip").className = "chip" + (mapping ? " ok" : "");
+    $("mapClear").hidden = !mapping;
+    if (mapping && $("mapCols").hidden) showMapHint(`${mapping.name} is gekoppeld. De export bevat artikelnummer en locatie.`);
+    $("thArt").textContent = mapping ? "Artikel" : "EAN";
+
+    let miss = 0;
+    const rows = scans.map((s, i) => {
+      let first;
+      if (mapping) {
+        const a = artFor(s.ean);
+        if (a === null) { miss++; first = `<span class="miss">Niet gevonden</span><br><span class="mono ean">${esc(s.ean)}</span>`; }
+        else first = `<span class="mono art">${esc(a)}</span><br><span class="mono ean">${esc(s.ean)}</span>`;
+      } else first = `<span class="mono art">${esc(s.ean)}</span>`;
+      return `<tr${flash && i === scans.length - 1 ? ' class="flash"' : ""}><td class="n mono">${i + 1}</td><td>${first}</td><td><span class="mono loc">${esc(s.loc)}</span></td><td class="x"><button type="button" data-del="${i}" aria-label="Regel ${i + 1} verwijderen">Verwijder</button></td></tr>`;
+    }).reverse();
+    if (!scans.length) {
+      rows.push(
+        `<tr class="example"><td class="n mono">2</td><td><span class="mono">8712345678906</span></td><td><span class="mono loc">A-03-02</span></td><td class="x">voorbeeld</td></tr>`,
+        `<tr class="example"><td class="n mono">1</td><td><span class="mono">8710398601234</span></td><td><span class="mono loc">A-01-04</span></td><td class="x">voorbeeld</td></tr>`
+      );
+    }
+    $("rows").innerHTML = rows.join("");
+    $("empty").hidden = !!scans.length;
+    $("clearWrap").hidden = !scans.length || !$("confirm").hidden;
+    $("cnt").textContent = scans.length;
+    $("missWrap").hidden = !miss;
+    $("missCnt").textContent = miss;
+  }
+  $("rows").addEventListener("click", e => {
+    const b = e.target.closest("button[data-del]");
+    if (!b) return;
+    scans.splice(+b.dataset.del, 1);
+    save(KEY_SCANS, scans);
+    render(false);
+  });
+
+  // keep the screen on while scanning
+  async function wake() { try { if (navigator.wakeLock && document.visibilityState === "visible") await navigator.wakeLock.request("screen"); } catch (e) {} }
+  document.addEventListener("visibilitychange", wake);
+  wake();
+
+  render(false);
+  focusScan();
+})();
+</script>
+</body>
+</html>
