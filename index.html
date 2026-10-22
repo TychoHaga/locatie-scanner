@@ -59,7 +59,11 @@ button:disabled { opacity: .45; cursor: default; }
 
 /* scan station */
 .station { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
-.steps { display: grid; grid-template-columns: 1fr 1fr; }
+.curloc { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 14px 16px; background: var(--loc); color: var(--loc-ink); }
+.curloc.none { background: var(--bg); color: var(--muted); border-bottom: 1px solid var(--line); }
+.curloc .lbl { font-size: .75rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.curloc .val { font-family: var(--f-mono); font-weight: 600; font-size: 2rem; line-height: 1.1; overflow-wrap: anywhere; }
+.curloc .cnt { font-family: var(--f-display); font-weight: 600; font-size: 1.2rem; text-align: right; }
 .step { padding: 12px 16px; font-family: var(--f-display); font-weight: 600; font-size: 1.05rem; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: baseline; min-width: 0; }
 .step b { font-size: 1.5rem; }
 .step.on.ean { background: var(--ean); color: #fff; border-color: var(--ean); }
@@ -68,11 +72,12 @@ button:disabled { opacity: .45; cursor: default; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .step.on.ean { color: #0c1626; } }
 .scanbody { padding: 18px 16px; display: flex; flex-direction: column; gap: 12px; }
 .prompt { font-family: var(--f-display); font-weight: 700; font-size: 1.9rem; line-height: 1.05; margin: 0; }
-.pending { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: .95rem; padding: 8px 12px; border-radius: 8px; background: var(--ean-soft); }
-.pending .mono { font-weight: 600; font-size: 1.05rem; }
-.pending .art { color: var(--muted); }
+.last { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: .95rem; padding: 8px 12px; border-radius: 8px; background: var(--ean-soft); }
+.last .mono { font-weight: 600; font-size: 1.05rem; }
+.last .art { color: var(--muted); }
 #scan { width: 100%; font-family: var(--f-mono); font-size: 1.5rem; padding: 14px 14px; border-radius: 10px; border: 2px solid var(--ean); background: var(--bg); color: var(--fg); min-width: 0; }
 .mode-loc #scan { border-color: var(--loc); }
+.legend { color: var(--muted); font-size: .88rem; margin: 0; }
 .tools { display: flex; gap: 8px; flex-wrap: wrap; }
 .msg { padding: 10px 12px; border-radius: 8px; font-size: .95rem; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .msg.bad { background: var(--bad-soft); color: var(--bad); }
@@ -125,20 +130,20 @@ tr.example td { color: var(--muted); opacity: .75; }
   <header>
     <div>
       <h1>Locatie Scanner</h1>
-      <p class="sub">Scan een EAN, daarna de locatie. Herhaal. Exporteer naar Excel.</p>
+      <p class="sub">Scan een locatie, daarna alle artikelen die erop liggen. Een nieuwe locatie scannen wisselt van locatie.</p>
     </div>
     <button id="exportBtn" class="primary" type="button">Exporteer Excel</button>
   </header>
 
   <section class="station" id="station" aria-live="polite">
-    <div class="steps">
-      <div class="step ean" id="stepEan"><b>1</b> EAN</div>
-      <div class="step loc" id="stepLoc"><b>2</b> Locatie</div>
+    <div class="curloc none" id="curloc">
+      <div><div class="lbl">Huidige locatie</div><div class="val" id="curVal">Geen</div></div>
+      <div class="cnt" id="curCnt"></div>
     </div>
     <div class="scanbody">
-      <p class="prompt" id="prompt">Scan een EAN</p>
-      <div class="pending" id="pending" hidden>
-        <span>EAN</span><span class="mono" id="pendingEan"></span><span class="art" id="pendingArt"></span>
+      <p class="prompt" id="prompt">Scan een locatie</p>
+      <div class="last" id="last" hidden>
+        <span>Laatste artikel</span><span class="mono" id="lastEan"></span><span class="art" id="lastArt"></span>
       </div>
       <div class="cam" id="cam" hidden>
         <video id="camVideo" playsinline muted></video>
@@ -152,6 +157,7 @@ tr.example td { color: var(--muted); opacity: .75; }
         <button id="camBtn" type="button">Scan met camera</button>
         <button id="undoBtn" type="button">Laatste scan ongedaan maken</button>
       </div>
+      <p class="legend">Locaties herkent de app aan de vorm <span class="mono">W.01.01</span> of <span class="mono">A.10.02.C</span>. Codes van 8 tot 14 cijfers zijn EAN's.</p>
       <label class="toggle" for="noKb"><input id="noKb" type="checkbox"> Schermtoetsenbord verbergen (handscanner gebruiken)</label>
     </div>
   </section>
@@ -213,20 +219,22 @@ tr.example td { color: var(--muted); opacity: .75; }
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script>
 (function () {
-  const KEY_SCANS = "ls.scans.v1", KEY_PENDING = "ls.pending.v1", KEY_MAP = "ls.map.v1", KEY_KB = "ls.nokb.v1";
+  const KEY_SCANS = "ls.scans.v1", KEY_LOC = "ls.curloc.v1", KEY_MAP = "ls.map.v1", KEY_KB = "ls.nokb.v1";
   const $ = id => document.getElementById(id);
 
   function load(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
   function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 
   let scans = load(KEY_SCANS, []);          // [{ean, loc, t}]
-  let pending = load(KEY_PENDING, null);    // ean waiting for a location
+  let curLoc = load(KEY_LOC, null);         // location that new articles are booked on
   let mapping = load(KEY_MAP, null);        // {name, count, map:{key: art}}
   let sheetRows = null;
 
   // EAN-13, UPC-A and GTIN-14 of the same product differ only in leading zeros
   const eanKey = v => String(v).replace(/\D/g, "").replace(/^0+/, "");
-  const looksLikeEan = v => /^\d{8}$|^\d{12,14}$/.test(v);
+  const looksLikeEan = v => /^\d{8,14}$/.test(v);
+  // hal.gang.niveau with an optional position: W.01.01, A.10.02.C
+  const looksLikeLoc = v => /^[A-Z]{1,3}[.-]\d{1,3}[.-]\d{1,3}([.-][A-Z0-9]{1,3})?$/i.test(v);
   const artFor = ean => mapping ? (mapping.map[eanKey(ean)] ?? null) : null;
 
   // ---------- sound ----------
@@ -261,43 +269,47 @@ tr.example td { color: var(--muted); opacity: .75; }
   function clearMsg() { $("msg").hidden = true; }
 
   // ---------- scanning ----------
-  function handleCode(raw, force) {
-    const code = String(raw).trim();
-    if (!code) return;
-    if (!pending) {
-      if (!force && !looksLikeEan(code)) {
-        beep(false);
-        showMsg(`"${code}" lijkt geen EAN. Scan eerst een EAN.`, "bad", { label: "Toch als EAN gebruiken", run: () => handleCode(code, true) });
-        return;
-      }
-      pending = code;
-      save(KEY_PENDING, pending);
-      beep(true);
-      clearMsg();
-    } else {
-      if (!force && (looksLikeEan(code) && code.length >= 12 || artFor(code) !== null)) {
-        beep(false);
-        showMsg(`"${code}" lijkt een EAN, geen locatie. Scan de locatie van ${pending}.`, "bad", {
-          label: "Toch als locatie gebruiken", run: () => handleCode(code, true)
-        });
-        return;
-      }
-      scans.push({ ean: pending, loc: code, t: Date.now() });
-      pending = null;
-      save(KEY_SCANS, scans); save(KEY_PENDING, null);
-      beep(true);
-      showMsg(`Opgeslagen: ${scans[scans.length - 1].ean} → ${code}`, "ok");
-      render(true);
+  function setLoc(code) {
+    curLoc = code.toUpperCase();
+    save(KEY_LOC, curLoc);
+    beep(true);
+    showMsg(`Locatie ${curLoc}. Scan nu de artikelen.`, "ok");
+    render(false);
+  }
+  function addArticle(code) {
+    if (!curLoc) {
+      beep(false);
+      showMsg(`Scan eerst een locatie, daarna de artikelen.`, "bad");
       return;
     }
-    render(false);
+    scans.push({ ean: code, loc: curLoc, t: Date.now() });
+    save(KEY_SCANS, scans);
+    beep(true);
+    clearMsg();
+    render(true);
+  }
+  // as is: "loc" or "ean" when the viewer overrides the automatic choice
+  function handleCode(raw, as) {
+    const code = String(raw).trim();
+    if (!code) return;
+    if (as === "loc" || (!as && looksLikeLoc(code))) return setLoc(code);
+    if (as === "ean" || (!as && looksLikeEan(code))) return addArticle(code);
+    beep(false);
+    showMsg(`"${code}" is geen locatie en geen EAN.`, "bad");
+    const m = $("msg");
+    [["Gebruik als locatie", "loc"], ["Gebruik als artikel", "ean"]].forEach(([label, kind]) => {
+      const btn = document.createElement("button");
+      btn.type = "button"; btn.textContent = label;
+      btn.addEventListener("click", () => { handleCode(code, kind); focusScan(); });
+      m.appendChild(btn);
+    });
   }
 
   $("scanForm").addEventListener("submit", e => {
     e.preventDefault();
     const v = $("scan").value;
     $("scan").value = "";
-    handleCode(v, false);
+    handleCode(v);
   });
 
   // a hardware scanner types into whatever has focus; pull stray keystrokes into the scan field
@@ -310,12 +322,17 @@ tr.example td { color: var(--muted); opacity: .75; }
   function focusScan() { try { $("scan").focus({ preventScroll: true }); } catch (e) {} }
 
   $("undoBtn").addEventListener("click", () => {
-    if (pending) { pending = null; save(KEY_PENDING, null); showMsg("EAN verwijderd. Scan opnieuw een EAN.", "ok"); }
-    else if (scans.length) {
-      const last = scans.pop();
-      pending = last.ean;
-      save(KEY_SCANS, scans); save(KEY_PENDING, pending);
-      showMsg(`Locatie ${last.loc} verwijderd. Scan opnieuw de locatie.`, "ok");
+    const last = scans[scans.length - 1];
+    if (last && last.loc === curLoc) {
+      scans.pop();
+      save(KEY_SCANS, scans);
+      showMsg(`Artikel ${last.ean} verwijderd.`, "ok");
+    } else if (curLoc) {
+      // no articles on this location yet: go back to the previous one
+      const prev = last ? last.loc : null;
+      showMsg(prev ? `Locatie ${curLoc} verwijderd. Terug naar ${prev}.` : `Locatie ${curLoc} verwijderd.`, "ok");
+      curLoc = prev;
+      save(KEY_LOC, curLoc);
     }
     render(false); focusScan();
   });
@@ -361,7 +378,7 @@ tr.example td { color: var(--muted); opacity: .75; }
     if (code && now - lastAt > 1200 && (code !== lastCode || now - lastAt > 3000)) {
       lastCode = code; lastAt = now;
       cam.classList.add("hit"); setTimeout(() => cam.classList.remove("hit"), 300);
-      handleCode(code, false);
+      handleCode(code);
     }
     if (stream) timer = setTimeout(tick, 120);
   }
@@ -458,8 +475,8 @@ tr.example td { color: var(--muted); opacity: .75; }
   $("clearBtn").addEventListener("click", () => { $("confirm").hidden = false; $("clearWrap").hidden = true; });
   $("confirmNo").addEventListener("click", () => { $("confirm").hidden = true; render(false); });
   $("confirmYes").addEventListener("click", () => {
-    scans = []; pending = null;
-    save(KEY_SCANS, scans); save(KEY_PENDING, null);
+    scans = []; curLoc = null;
+    save(KEY_SCANS, scans); save(KEY_LOC, null);
     $("confirm").hidden = true; clearMsg(); render(false); focusScan();
   });
 
@@ -486,18 +503,22 @@ tr.example td { color: var(--muted); opacity: .75; }
   // ---------- render ----------
   function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
   function render(flash) {
-    const loc = !!pending;
+    const loc = !curLoc;
     $("station").classList.toggle("mode-loc", loc);
-    $("stepEan").classList.toggle("on", !loc);
-    $("stepLoc").classList.toggle("on", loc);
-    $("prompt").textContent = loc ? "Scan de locatie" : "Scan een EAN";
-    $("pending").hidden = !loc;
-    if (loc) {
-      $("pendingEan").textContent = pending;
-      const a = artFor(pending);
-      $("pendingArt").textContent = mapping ? (a !== null ? `Artikel ${a}` : "Niet in artikelbestand") : "";
+    $("curloc").classList.toggle("none", loc);
+    $("curVal").textContent = curLoc || "Geen";
+    let here = 0;
+    for (let i = scans.length - 1; i >= 0 && scans[i].loc === curLoc; i--) here++;
+    $("curCnt").textContent = curLoc ? `${here} ${here === 1 ? "artikel" : "artikelen"}` : "";
+    $("prompt").textContent = loc ? "Scan een locatie" : "Scan artikelen of een nieuwe locatie";
+    const last = scans[scans.length - 1];
+    $("last").hidden = !(last && last.loc === curLoc);
+    if (!$("last").hidden) {
+      $("lastEan").textContent = last.ean;
+      const a = artFor(last.ean);
+      $("lastArt").textContent = mapping ? (a !== null ? `Artikel ${a}` : "Niet in artikelbestand") : "";
     }
-    $("undoBtn").disabled = !pending && !scans.length;
+    $("undoBtn").disabled = !curLoc && !scans.length;
 
     $("mapChip").textContent = mapping ? `${mapping.count} artikelen` : "Niet geladen";
     $("mapChip").className = "chip" + (mapping ? " ok" : "");
@@ -517,8 +538,8 @@ tr.example td { color: var(--muted); opacity: .75; }
     }).reverse();
     if (!scans.length) {
       rows.push(
-        `<tr class="example"><td class="n mono">2</td><td><span class="mono">8712345678906</span></td><td><span class="mono loc">A-03-02</span></td><td class="x">voorbeeld</td></tr>`,
-        `<tr class="example"><td class="n mono">1</td><td><span class="mono">8710398601234</span></td><td><span class="mono loc">A-01-04</span></td><td class="x">voorbeeld</td></tr>`
+        `<tr class="example"><td class="n mono">2</td><td><span class="mono">8712345678906</span></td><td><span class="mono loc">W.01.01</span></td><td class="x">voorbeeld</td></tr>`,
+        `<tr class="example"><td class="n mono">1</td><td><span class="mono">8710398601234</span></td><td><span class="mono loc">A.10.02.C</span></td><td class="x">voorbeeld</td></tr>`
       );
     }
     $("rows").innerHTML = rows.join("");
