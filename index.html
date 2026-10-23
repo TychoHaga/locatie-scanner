@@ -167,7 +167,7 @@ tr.example td { color: var(--muted); opacity: .75; }
       <h2>Artikelbestand</h2>
       <span class="chip" id="mapChip">Niet geladen</span>
     </div>
-    <p class="hint" id="mapHint">Optioneel. Laad een Excel- of CSV-bestand met EAN's en artikelnummers. Dan staat in de export het artikelnummer in plaats van de EAN.</p>
+    <p class="hint" id="mapHint">Optioneel. Laad een Excel- of CSV-bestand met EAN's en artikelnummers. Dan staat in de export het artikelnummer in plaats van de EAN, en de groep als je bestand die heeft.</p>
     <div class="tools">
       <label class="btn file-btn" for="mapFile">Bestand kiezen
         <input id="mapFile" type="file" accept=".xlsx,.xls,.csv,.ods,text/csv">
@@ -181,6 +181,9 @@ tr.example td { color: var(--muted); opacity: .75; }
         </label>
         <label class="field" for="colArt">Kolom met artikelnummer
           <select id="colArt"></select>
+        </label>
+        <label class="field" for="colGrp">Kolom met groep (optioneel)
+          <select id="colGrp"></select>
         </label>
       </div>
       <div class="tools" style="margin-top:10px">
@@ -236,6 +239,7 @@ tr.example td { color: var(--muted); opacity: .75; }
   // hal.gang.niveau with an optional position: W.01.01, A.10.02.C
   const looksLikeLoc = v => /^[A-Z]{1,3}[.-]\d{1,3}[.-]\d{1,3}([.-][A-Z0-9]{1,3})?$/i.test(v);
   const artFor = ean => mapping ? (mapping.map[eanKey(ean)] ?? null) : null;
+  const grpFor = ean => mapping && mapping.groups ? (mapping.groups[eanKey(ean)] ?? "") : "";
 
   // ---------- sound ----------
   let ac = null;
@@ -424,8 +428,9 @@ tr.example td { color: var(--muted); opacity: .75; }
       if (!sheetRows.length) { showMapHint("Het bestand is leeg.", true); return; }
       sheetRows.fileName = f.name;
       const headers = sheetRows[0].map((h, i) => String(h).trim() || `Kolom ${XLSX.utils.encode_col(i)}`);
-      ["colEan", "colArt"].forEach(id => {
+      ["colEan", "colArt", "colGrp"].forEach(id => {
         const s = $(id); s.innerHTML = "";
+        if (id === "colGrp") s.innerHTML = '<option value="-1">Geen groep</option>';
         headers.forEach((h, i) => {
           const sample = sheetRows[1] ? String(sheetRows[1][i] ?? "") : "";
           const o = document.createElement("option");
@@ -434,9 +439,11 @@ tr.example td { color: var(--muted); opacity: .75; }
         });
       });
       $("colEan").value = guess(headers, ["ean", "barcode", "gtin"]);
-      let ai = guess(headers, ["artikel", "art.", "artnr", "sku", "item"]);
+      let ai = guess(headers.map(h => /groep|group/i.test(h) ? "" : h), ["artikel", "art.", "artnr", "sku", "item"]);
       if (ai === +$("colEan").value && headers.length > 1) ai = ai === 0 ? 1 : 0;
       $("colArt").value = ai;
+      const gi = headers.findIndex(h => /groep|group/i.test(h));
+      $("colGrp").value = gi;
       $("mapCols").hidden = false;
       showMapHint(`${f.name}: ${sheetRows.length - 1} regels gevonden. Controleer de kolommen en klik op Koppelen.`);
     } catch (err) {
@@ -449,16 +456,19 @@ tr.example td { color: var(--muted); opacity: .75; }
   }
   $("mapApply").addEventListener("click", () => {
     if (!sheetRows) return;
-    const ce = +$("colEan").value, ca = +$("colArt").value;
-    const map = {};
+    const ce = +$("colEan").value, ca = +$("colArt").value, cg = +$("colGrp").value;
+    const map = {}, groups = cg >= 0 ? {} : null;
     let n = 0;
     for (let r = 1; r < sheetRows.length; r++) {
       const k = eanKey(cellText(sheetRows[r][ce]));
       const a = cellText(sheetRows[r][ca]);
-      if (k && a) { map[k] = a; n++; }
+      if (k && a) {
+        map[k] = a; n++;
+        if (groups) { const g = cellText(sheetRows[r][cg]); if (g) groups[k] = g; }
+      }
     }
     if (!n) { showMapHint("Geen EAN's gevonden in die kolom. Kies een andere kolom.", true); return; }
-    mapping = { name: sheetRows.fileName, count: n, map };
+    mapping = { name: sheetRows.fileName, count: n, map, groups };
     save(KEY_MAP, mapping);
     sheetRows = null;
     $("mapCols").hidden = true;
@@ -484,14 +494,18 @@ tr.example td { color: var(--muted); opacity: .75; }
   $("exportBtn").addEventListener("click", async () => {
     if (!scans.length) { showMsg("Er is nog niets gescand om te exporteren.", "bad"); return; }
     if (!window.XLSX) { showMsg("De Excel-module is niet geladen. Controleer de internetverbinding en herlaad de pagina.", "bad"); return; }
+    const withGrp = !!(mapping && mapping.groups);
     const head = mapping ? ["Artikelnummer", "Locatie"] : ["EAN", "Locatie"];
+    if (withGrp) head.push("Groep");
     const aoa = [head].concat(scans.map(s => {
       if (!mapping) return [String(s.ean), String(s.loc)];
       const a = artFor(s.ean);
-      return [a !== null ? String(a) : `${s.ean} (niet gevonden)`, String(s.loc)];
+      const row = [a !== null ? String(a) : `${s.ean} (niet gevonden)`, String(s.loc)];
+      if (withGrp) row.push(grpFor(s.ean));
+      return row;
     }));
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws["!cols"] = [{ wch: 24 }, { wch: 16 }];
+    ws["!cols"] = [{ wch: 24 }, { wch: 16 }, { wch: 18 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Scans");
     const d = new Date(), p = n => String(n).padStart(2, "0");
@@ -516,14 +530,15 @@ tr.example td { color: var(--muted); opacity: .75; }
     if (!$("last").hidden) {
       $("lastEan").textContent = last.ean;
       const a = artFor(last.ean);
-      $("lastArt").textContent = mapping ? (a !== null ? `Artikel ${a}` : "Niet in artikelbestand") : "";
+      const g = grpFor(last.ean);
+      $("lastArt").textContent = mapping ? (a !== null ? `Artikel ${a}${g ? " · groep " + g : ""}` : "Niet in artikelbestand") : "";
     }
     $("undoBtn").disabled = !curLoc && !scans.length;
 
     $("mapChip").textContent = mapping ? `${mapping.count} artikelen` : "Niet geladen";
     $("mapChip").className = "chip" + (mapping ? " ok" : "");
     $("mapClear").hidden = !mapping;
-    if (mapping && $("mapCols").hidden) showMapHint(`${mapping.name} is gekoppeld. De export bevat artikelnummer en locatie.`);
+    if (mapping && $("mapCols").hidden) showMapHint(`${mapping.name} is gekoppeld. De export bevat artikelnummer, locatie${mapping.groups ? " en groep" : ""}.`);
     $("thArt").textContent = mapping ? "Artikel" : "EAN";
 
     let miss = 0;
@@ -532,7 +547,10 @@ tr.example td { color: var(--muted); opacity: .75; }
       if (mapping) {
         const a = artFor(s.ean);
         if (a === null) { miss++; first = `<span class="miss">Niet gevonden</span><br><span class="mono ean">${esc(s.ean)}</span>`; }
-        else first = `<span class="mono art">${esc(a)}</span><br><span class="mono ean">${esc(s.ean)}</span>`;
+        else {
+          const g = grpFor(s.ean);
+          first = `<span class="mono art">${esc(a)}</span>${g ? ` <span class="ean">· ${esc(g)}</span>` : ""}<br><span class="mono ean">${esc(s.ean)}</span>`;
+        }
       } else first = `<span class="mono art">${esc(s.ean)}</span>`;
       return `<tr${flash && i === scans.length - 1 ? ' class="flash"' : ""}><td class="n mono">${i + 1}</td><td>${first}</td><td><span class="mono loc">${esc(s.loc)}</span></td><td class="x"><button type="button" data-del="${i}" aria-label="Regel ${i + 1} verwijderen">Verwijder</button></td></tr>`;
     }).reverse();
