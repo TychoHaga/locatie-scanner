@@ -50,8 +50,35 @@ Stand van zaken op 25-10-2026. Plak dit in een nieuwe sessie (Claude Code met de
 - Beheer → ERP Sync-status toont per sync "Week (volledig)" of "Dag (locaties)" met de tellingen, en een knop "Verschillen downloaden (Excel)".
 - Reservekopie van vóór de eerste sync: tabel `backup_inventory_items_20261025` (31.251 rijen: echte locaties plus rijen met ean_code_2 of omschrijving). Die mag weg zodra alles een paar dagen goed loopt.
 
-## Openstaand
+### Weeksync (gebouwd, planning staat, nog niet gedraaid)
 
-1. **Weeksync (scope `full`, ±2,4 miljoen artikelen).** Get Straight Table Data haalt maximaal 100.000 cellen op, dus deze route werkt niet. Opties uitzoeken en eerst aan de gebruiker voorleggen. Let op: een full-finish verwijdert alles wat niet is aangeraakt, dus de lijst moet gegarandeerd compleet zijn.
-2. **Artikelnummers met komma's.** 12.092 rijen in de app hebben een artikelnummer als `447,050` (waarschijnlijk een oude Excel-import). Daarvan hebben 100 een locatie, en die staan nu allemaal in "Alleen in app". 24 daarvan hebben ook een schone variant (`447050`). Met de gebruiker bespreken of dit opgeschoond moet worden.
+**Qlik-app "Inventory Scan Hub - Sync Volledig"** (`afe6d268-f4ed-43b4-928c-d996a0b1b479`)
+- Alle artikelen uit `HAGA_DIM_Artikelen`. Artikelen met een geldige locatie krijgen een regel per locatie (dezelfde regels als de dagsync), artikelen zonder locatie krijgen `-`.
+- Tabel `SyncAlles`: 2.266.237 regels op 25-10, met het veld `Blok` (blokken van 10.000, 227 blokken). `SyncInfo.Sync_AantalRegels` bevat het verwachte totaal.
+- Sheet `5f104544-c4ba-4b1f-817d-65847b8a85b0` met tabel `6aee2a14-6462-4513-9de1-984082ef15cb`.
+
+**Qlik-automatisering "Inventory Scan Hub - Weeksync volledig"** (`070c1ec1-7cbc-4a65-9d90-732445ade115`)
+- Stappen:
+  1. Do Reload
+  2. Get Expression Value `=Max({1} Sync_AantalRegels)` (blok `verwachtAantal`)
+  3. `start` (`scope: full`)
+  4. List Values Of Field `Blok`, met in de loop: Select Field Value `{$.blokken.item.qText}`, Get Straight Table Data en `upsert`
+  5. `finish` met `expected_count: {$.verwachtAantal}`
+- Planning: elke zondag om 03:00 Europe/Amsterdam (eerste run 01-11-2026).
+
+**Edge function (stand na 25-10)**
+- `upsert` loopt via een directe DB-verbinding: één INSERT … ON CONFLICT met COALESCE, en alleen als er iets veranderd is.
+- Seen-regels worden voor alle scopes bijgehouden.
+- Full-`finish` vereist `expected_count`. Het veiligheidsslot controleert dat `received == expected_count` en dat het aantal geziene regels minstens 90% is van de app. Daarna worden rijen verwijderd die niet in seen staan; beschermde rijen blijven.
+- Let op: `erp-bridge.py` (oud script) stuurt geen `expected_count` mee.
+
+**Qlik Automate-workspace JSON (werkt, getest)**
+- `StartBlock`, `SnippetBlock` met `snippet_guid`, `EndpointBlock` met `endpoint_guid`, `ShowBlock` (output met input-id `input`).
+- Een list-blok krijgt `loopBlockId`; het item binnen de loop is `{$.blokNaam.item}`.
+- Formules: `{json: …}` en `{count: …}`.
+- Schedules: `startAt` in de vorm `"YYYY-MM-DD HH:MM:SS"` en recurrence `"RRULE:…"`.
+
+## Openstaand
+1. **Eerste weeksync:** eerst een volledige reservekopie van `inventory_items` maken. De eerste run verandert veel (groep en omschrijving op ±2,2 mln rijen) en duurt naar schatting 2 tot 3 uur.
+2. **Artikelnummers met komma's:** 12.092 rijen zoals `447,050` bestaan niet in Easy-Trade (ook niet zonder komma) en verdwijnen bij de eerste weeksync. Komma's in echte Easy-Trade-nummers (zoals `M20X1,5`) zijn wel geldig.
 3. 582 gesynchroniseerde regels hebben geen EAN in Easy-Trade.
