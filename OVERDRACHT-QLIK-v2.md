@@ -1,59 +1,57 @@
-# Overdracht v2: sync van Qlik Cloud naar de Inventory Scan Hub
+# Overdracht v3: sync van Qlik Cloud naar de Inventory Scan Hub
 
-Plak dit hele bericht als eerste bericht in een nieuwe sessie (Claude Code op claude.ai/code, met de Qlik- en Lovable-connectors aan en ingelogd).
+Stand van zaken op 25-10-2026. Plak dit in een nieuwe sessie (Claude Code met de Qlik- en Lovable-connectors aan en ingelogd) om verder te gaan. Werk stap voor stap en vraag om bevestiging voordat je iets aanmaakt of wijzigt. De gebruiker communiceert in het Nederlands.
 
-## Opdracht
+**Niet aanraken:** de automatisering "Autotaal app reload" en de app "HAGA Dashboard in-en verkoop". Daar komt alle Easy-Trade-data vandaan.
 
-Stel de automatische sync in tussen Qlik Cloud (bron: Easy-Trade van Autotaal) en de Inventory Scan Hub. Gebruik de Qlik-connector voor Qlik Cloud en de Lovable-connector voor de app. Werk stap voor stap en vraag mij om bevestiging voordat je iets aanmaakt of wijzigt. Ik communiceer in het Nederlands.
+## Wat er staat en werkt
 
-Er zijn twee syncs:
+### Dagsync (klaar en getest)
 
-| | Wat | Scope | Wanneer |
-|---|---|---|---|
-| **Dagsync** | Alle artikelen die in Easy-Trade een locatie hebben | `located` | Elke nacht om 02:00 (Europe/Amsterdam) |
-| **Weeksync** | Alle artikelen (±2,1 miljoen) | `full` | Eén keer per week, bijvoorbeeld zondagnacht |
+**Qlik-app "Inventory Scan Hub - Sync"** (`d7a02a15-065c-4887-9788-e0531d41fb08`, persoonlijke ruimte)
+- Leest alleen QVD's uit `lib://QVD_TRANSFORMED:DataFiles`:
+  - de meest recente `HAGA_FACTS_Voorraad_DD-MM-YYYY.qvd` (filiaal 0, velden `Vrd_Loc_Picking` en `Vrd_Loc_Extra`)
+  - `HAGA_DIM_Artikelen.qvd`
+- Er komt geen STORE in het script.
+- Tabel `SyncLocaties` bevat één regel per artikel + locatie, met de kolommen `article_number`, `ean_code`, `description`, `location` en `group`. `group` is `%ArtGrp_Key`, dus Artikel_HoofdgroepNummer.
+- Locaties worden in hoofdletters gezet zonder spaties.
+- Overgeslagen als "geen locatie": `-`, `0`, `NAN` en `GEEN`.
+- Geldige vormen:
+  - `X.00.00`, `X.00.00.X`, `XX.00.00` en `XX.00.00.X` (dus ook SL/BL)
+  - de speciale codes `BULK`, `AB1` en `CD2`
+- Tabel `OngeldigeLocaties` toont typefouten om in Easy-Trade te verbeteren. Dat waren er 28 op 25-10.
+- Sheet "Sync naar Inventory Scan Hub" (`8b1621ae-41e6-49e3-b407-9205ae00f25d`) bevat de tabel (`a70141a9-daed-4857-8cba-dd71766d973b`). De dimensies zijn article_number en location; de measures zijn `MaxString(x) & ''`.
 
-Na elke dagsync wordt in de app een verschillenrapport gemaakt. Dat is te downloaden als Excel onder Beheer → ERP Sync-status, met de kolommen Artikelnummer, Locatie Easy-Trade, Locatie app, Groep en Soort verschil.
+**Qlik-automatisering "Inventory Scan Hub - Dagsync locaties"** (`8184d090-8989-43e3-95a2-bc364ddfa3eb`)
+- Stappen:
+  1. Do Reload van de sync-app
+  2. Get Straight Table Data
+  3. API Key Raw Request `start` (`scope: located`)
+  4. één `upsert` met alle items (`{json: {$.getStraightTableData}}`)
+  5. `finish`
+- Alle blokken staan op "stop on error". Bij een fout wordt finish dus niet aangeroepen. Een sync die blijft hangen, wordt bij de volgende start na 3 uur automatisch op "failed" gezet.
+- De sleutel staat in de Qlik-connectie "API Key" (`9527f95b-3c97-47ad-bacf-b3fc2fcfda2a`): header `x-api-key`, base URL `yzuxtgqwpmylzmrfsxrp.supabase.co/functions/v1/`. Dit is een billable connector.
+- Planning: zie hieronder.
+- Testrun 25-10 19:51 duurde 1,5 minuut:
+  - 9.819 regels verwerkt
+  - 1.323 oude locaties verwijderd (verhuizingen)
+  - 339 regels "Alleen in app", 0 regels "Andere locatie"
+  - totaal 2.095.562 rijen
 
-## Achtergrond
+**Lovable / edge function `inventory-sync`**
+- `start` accepteert `scope` (`full` of `located`) en zet syncs die langer dan 3 uur op "running" staan op "failed".
+- `upsert`:
+  - maximaal 25.000 items per aanroep, intern verwerkt in stukken van 500 (de PostgREST-limiet is 8 seconden)
+  - lege `ean_code`, `ean_code_2`, `description` en `group` overschrijven geen bestaande waarden
+- `finish`:
+  - loopt via een directe DB-verbinding (`SUPABASE_DB_URL`, statement_timeout 10 minuten)
+  - `located` roept `finish_located_sync` aan: verhuizingen, en daarna het verschillenrapport in `inventory_sync_diffs`
+  - `full` voert de stale-delete uit
+- Beheer → ERP Sync-status toont per sync "Week (volledig)" of "Dag (locaties)" met de tellingen, en een knop "Verschillen downloaden (Excel)".
+- Reservekopie van vóór de eerste sync: tabel `backup_inventory_items_20261025` (31.251 rijen: echte locaties plus rijen met ean_code_2 of omschrijving). Die mag weg zodra alles een paar dagen goed loopt.
 
-- **De app:** Inventory Scan Hub, een Lovable-project.
-  - Project-id: `ab46552c-dacf-44f9-9207-e6ceb5971feb`
-  - Workspace: "Tycho's Lovable" (`FsKqMj7urzq0msYTstQB`)
-  - Live: https://inventory-scan-hub.lovable.app
-  - Supabase-project: `yzuxtgqwpmylzmrfsxrp`
-  - Edge function URL: `https://yzuxtgqwpmylzmrfsxrp.supabase.co/functions/v1/inventory-sync`
-- **De database** (25-10-2026): 2.095.020 rijen in `inventory_items`, met 2.094.480 unieke artikelnummers. 0 artikelen hebben `location_set_in_app_at`.
-  - Locaties: 2.086.434 rijen hebben `-` (geen locatie), 8.341 hebben een echte locatie in de vorm W.01.01 of A.10.02.C, en 245 hebben een andere waarde.
-  - De dagsync gaat dus over ongeveer 8.600 artikelen. Filter in Qlik `-` en lege locaties eruit. In het verschillenrapport tellen `-` en `ONBEKEND` niet mee. Er is één eerdere testsync geweest (29-07-2026, start en daarna abort), dus de functie en het secret hebben toen gewerkt.
-- **De sessie van 25-10:** de bug in finish (`.rpc(...).catch` gaf een crash nadat de stale-delete al was uitgevoerd) is hersteld en gedeployed. Daarna zijn scope, verschillenrapport en download gebouwd. Controleer met `read_file` op `supabase/functions/inventory-sync/index.ts` hoe het nu precies werkt.
+## Openstaand
 
-## Edge function `inventory-sync`
-
-- **Header:** `x-api-key` met de waarde van het secret `INVENTORY_SYNC_API_KEY`. Dat staat in Lovable onder Cloud → Secrets en ik vul het zelf in. Zet het nooit in de chat, in code of in platte tekst in Qlik. Gebruik in Qlik Automate een veilige plek, zoals een connection of credential.
-- **Body (JSON):**
-  1. `{"mode":"start","scope":"located"|"full"}` geeft `{sync_id, started_at}` terug. Zonder `scope` wordt het `full`.
-  2. `{"mode":"upsert","sync_id":"…","items":[{article_number, ean_code, ean_code_2, location, description, group}, …]}` met maximaal 5000 items per keer. Upsert gebeurt op (`article_number`, `location`).
-  3. `{"mode":"finish","sync_id":"…"}`
-     - Bij **full**: **verwijdert alle artikelen die tijdens deze sync niet zijn aangeraakt.**
-     - Bij **located**: verwijdert geen artikelen die ontbreken. Wel verdwijnen oude locaties van gemelde artikelen (verhuizing), behalve locaties die in de app zijn ingeboekt. Daarna wordt het verschillenrapport gemaakt.
-  4. `{"mode":"abort","sync_id":"…","error":"…"}` breekt de sync af zonder iets te verwijderen.
-
-## Plan
-
-1. **Qlik:** zoek de app met de Easy-Trade-voorraad op. Controleer de velden (artikelnummer, EAN, 2e EAN, locatie, omschrijving, groep) en de aantallen: hoeveel artikelen in totaal en hoeveel met een locatie. Kijk ook hoe laat de app 's nachts herladen wordt; dat moet vóór 02:00 zijn.
-2. **Dagsync (Qlik Automate):** maak een straight table met alleen artikelen die een locatie hebben. "Get Straight Table Data" haalt maximaal 100.000 regels op. Controleer dat het aantal daaronder blijft. De stappen:
-   - Call URL voor start (`scope: located`)
-   - Get Straight Table Data
-   - Loop batch (1000) met Call URL voor upsert
-   - Controle of het aantal verstuurde regels gelijk is aan het aantal in Qlik
-   - Call URL voor finish
-   - Bij een fout: abort
-3. **Weeksync:** ±2,1 miljoen regels passen niet in Get Straight Table Data. Zoek een andere route, bijvoorbeeld: het reload-script schrijft een CSV of QVD weg die via een veilige URL bereikbaar is, en een (nieuwe) edge function haalt die zelf op en verwerkt hem in delen. Leg mij eerst de opties voor. **Een onvolledige weeksync gevolgd door finish wist artikelen uit de app.**
-4. **Test** eerst de dagsync één keer handmatig. Controleer daarna ERP Sync-status, het verschillenrapport en een paar artikelen in de app. Zet pas dan de planning aan. Doe daarna hetzelfde voor de weeksync.
-
-## Waar je op moet letten
-
-- Preview en live app delen dezelfde database.
-- Het verschillenrapport "Alleen in app" kan bij de eerste dagsync erg groot zijn, omdat catalogusartikelen een locatie kunnen hebben die Easy-Trade niet meldt. Bespreek dat met mij na de eerste test.
-- Roep finish alleen aan als de lijst gegarandeerd compleet is. Anders altijd abort.
+1. **Weeksync (scope `full`, ±2,4 miljoen artikelen).** Get Straight Table Data haalt maximaal 100.000 cellen op, dus deze route werkt niet. Opties uitzoeken en eerst aan de gebruiker voorleggen. Let op: een full-finish verwijdert alles wat niet is aangeraakt, dus de lijst moet gegarandeerd compleet zijn.
+2. **Artikelnummers met komma's.** 12.092 rijen in de app hebben een artikelnummer als `447,050` (waarschijnlijk een oude Excel-import). Daarvan hebben 100 een locatie, en die staan nu allemaal in "Alleen in app". 24 daarvan hebben ook een schone variant (`447050`). Met de gebruiker bespreken of dit opgeschoond moet worden.
+3. 582 gesynchroniseerde regels hebben geen EAN in Easy-Trade.
