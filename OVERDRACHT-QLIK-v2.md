@@ -23,7 +23,9 @@ Na elke dagsync wordt in de app een verschillenrapport gemaakt. Dat is te downlo
   - Live: https://inventory-scan-hub.lovable.app
   - Supabase-project: `yzuxtgqwpmylzmrfsxrp`
   - Edge function URL: `https://yzuxtgqwpmylzmrfsxrp.supabase.co/functions/v1/inventory-sync`
-- **De database** (25-10-2026): 2.095.020 rijen in `inventory_items`, met 2.094.480 unieke artikelnummers. 0 artikelen hebben `location_set_in_app_at`. Er is één eerdere testsync geweest (29-07-2026, start en daarna abort), dus de functie en het secret hebben toen gewerkt.
+- **De database** (25-10-2026): 2.095.020 rijen in `inventory_items`, met 2.094.480 unieke artikelnummers. 0 artikelen hebben `location_set_in_app_at`.
+  - Locaties: 2.086.434 rijen hebben `-` (geen locatie), 8.341 hebben een echte locatie in de vorm W.01.01 of A.10.02.C, en 245 hebben een andere waarde.
+  - De dagsync gaat dus over ongeveer 8.600 artikelen. Filter in Qlik `-` en lege locaties eruit. In het verschillenrapport tellen `-` en `ONBEKEND` niet mee. Er is één eerdere testsync geweest (29-07-2026, start en daarna abort), dus de functie en het secret hebben toen gewerkt.
 - **De sessie van 25-10:** de bug in finish (`.rpc(...).catch` gaf een crash nadat de stale-delete al was uitgevoerd) is hersteld en gedeployed. Daarna zijn scope, verschillenrapport en download gebouwd. Controleer met `read_file` op `supabase/functions/inventory-sync/index.ts` hoe het nu precies werkt.
 
 ## Edge function `inventory-sync`
