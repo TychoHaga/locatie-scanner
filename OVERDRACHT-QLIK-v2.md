@@ -106,8 +106,14 @@ Stand van zaken op 26-10-2026. Plak dit in een nieuwe sessie (Claude Code met de
 ### Weeksync 26-10 (eerste volledige run)
 - 2.265.437 regels ontvangen = verwacht, 468.879 gewijzigd, 83.999 verwijderd (niet meer in Easy-Trade), totaal 2.261.815. Duur 42 min.
 
+### Database-storing 26-10 en afslanken
+- Rond 07:05–08:00 UTC was de database onbereikbaar: het IO-budget van de Tiny-instance was op (waarschuwing 06:12) door de eerste volledige weeksync plus de eenmalige EAN-opschoning.
+- De gebruiker koos ervoor op Tiny te blijven (Small ≈ +66 credits/maand). Daarom afgeslankt (migratie `20261026090000_slim_database.sql`): back-ups weg, `inventory_sync_seen` geleegd (308 MB bloat), ongebruikte trigram-indexen (description, article_number, ean_code) en `idx_inventory_ean_code` weg, dubbele triggers weg. `inventory_items` van 1.545 naar 1.157 MB.
+- `search_by_location` en `get_location_suggestions` werken via een MATERIALIZED CTE op de locatieregels (was 3–12 s, nu 20–300 ms).
+- Idee als het zondag weer krap wordt: de seen-registratie van de weeksync (2,2 mln inserts per week) zuiniger maken, of Mini-instance (+15 credits/maand).
+
 ## Openstaand
-1. Reservekopieën `backup_inventory_items_20261025`, `backup_inventory_items_full_20261025` en `backup_inventory_items_20261026_ean` mogen weg na een paar goede nachten.
+1. Weeksync van zondag 01-11 controleren (check-in staat gepland).
 2. **Artikelnummers met komma's:** 12.092 rijen zoals `447,050` bestaan niet in Easy-Trade (ook niet zonder komma) en verdwijnen bij de eerste weeksync. Komma's in echte Easy-Trade-nummers (zoals `M20X1,5`) zijn wel geldig.
 3. 420 regels met locatie hebben geen EAN: zie de download "Locatie zonder EAN" in Beheer.
 4. Of de dagsync de nieuwe tabel `SyncLocaties v2` (met ean_code_2) gebruikt, is niet zeker: de update gaf een validatiefout bij het teruglezen. De weeksync stuurt ean_code_2 in elk geval mee. Controleer in Qlik Automate of blok `getStraightTableData` naar object `417fd54a-…` wijst.
