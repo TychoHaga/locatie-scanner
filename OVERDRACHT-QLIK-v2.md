@@ -93,9 +93,22 @@ Stand van zaken op 26-10-2026. Plak dit in een nieuwe sessie (Claude Code met de
 - `fix_ean_quality()`: onbruikbare EAN's wissen; dubbele regels van hetzelfde artikelnummer samenvoegen (de regel met locatie krijgt EAN, tweede EAN, omschrijving en groep); EAN overnemen van een schrijfvariant (`article_number_normalized`, alleen als die precies één EAN heeft); overbodige `-`/`ONBEKEND`-regels van artikelen met een locatie verwijderen.
 - `set_article_ean(p_article_number, p_ean)`: knop "EAN scannen" bij een zoekresultaat zonder (bruikbare) EAN, plus een `+` voor een extra EAN.
 - Views `ean_corrections_export` en `items_located_without_ean`; Beheer → ERP & Easy-Trade → kaart "EAN-correcties voor Easy-Trade" met twee Excel-downloads.
+- `fix_ean_quality()` werkt alleen op de ~10k locatieregels (tijdelijke tabel `_loc` + partiële index `idx_inventory_items_real_location`): ±4 s per run. `clean_ean` en `is_real_location` hebben bewust géén `SET search_path`, anders kan Postgres ze niet inline uitvoeren (de eerste versie liep daardoor 10 min vast).
+- Eerste run 26-10: 28.381 kapotte EAN's gewist (19 op een locatie), 21 EAN's van een schrijfvariant. Nog 420 locatieregels zonder EAN.
+- Reservekopie van vóór de EAN-opschoning: `backup_inventory_items_20261026_ean` (38.183 rijen).
 - Een EAN in wetenschappelijke notatie (`8,71235E+12`) is niet terug te rekenen: Excel heeft de laatste 7 cijfers weggegooid. Alleen vervangen uit een andere bron of opnieuw scannen.
 
+### Zoeken (26-10)
+- Kolom `search_codes` (trigger `trg_set_search_codes`, GIN-index): Bosch-filtercode uit de omschrijving (`OLIEFILTER P7166` bij F 026 407 166: letter + laatste 4 cijfers van het artikelnummer) en NGK-nummer tussen haakjes bij (gloei)bougies (`BOUGIE (5788)` bij LFR 6 C-11). ±4.575 artikelen.
+- `search_inventory_normalized`: een code telt als EAN-treffer; deel-treffers op het artikelnummer (SP85020 bij P85020) alleen als er geen exacte treffer is.
+- Zoekscherm: één blok per artikel met de locatie groot en de extra locatie(s) eronder. De volgorde is alfabetisch; de app weet (nog) niet welke de picking-locatie is.
+
+### Weeksync 26-10 (eerste volledige run)
+- 2.265.437 regels ontvangen = verwacht, 468.879 gewijzigd, 83.999 verwijderd (niet meer in Easy-Trade), totaal 2.261.815. Duur 42 min.
+
 ## Openstaand
-1. Reservekopieën `backup_inventory_items_20261025` en `backup_inventory_items_full_20261025` mogen weg na een paar goede nachten.
+1. Reservekopieën `backup_inventory_items_20261025`, `backup_inventory_items_full_20261025` en `backup_inventory_items_20261026_ean` mogen weg na een paar goede nachten.
 2. **Artikelnummers met komma's:** 12.092 rijen zoals `447,050` bestaan niet in Easy-Trade (ook niet zonder komma) en verdwijnen bij de eerste weeksync. Komma's in echte Easy-Trade-nummers (zoals `M20X1,5`) zijn wel geldig.
-3. Ongeveer 494 regels met locatie hebben ook na het samenvoegen geen EAN in Easy-Trade: zie de download "Locatie zonder EAN" in Beheer.
+3. 420 regels met locatie hebben geen EAN: zie de download "Locatie zonder EAN" in Beheer.
+4. Of de dagsync de nieuwe tabel `SyncLocaties v2` (met ean_code_2) gebruikt, is niet zeker: de update gaf een validatiefout bij het teruglezen. De weeksync stuurt ean_code_2 in elk geval mee. Controleer in Qlik Automate of blok `getStraightTableData` naar object `417fd54a-…` wijst.
+5. Eventueel: het soort locatie (picking / extra) uit Easy-Trade meesturen, zodat de picking-locatie bovenaan staat.
