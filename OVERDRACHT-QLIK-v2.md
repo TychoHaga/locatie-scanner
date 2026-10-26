@@ -112,9 +112,16 @@ Stand van zaken op 26-10-2026. Plak dit in een nieuwe sessie (Claude Code met de
 - `search_by_location` en `get_location_suggestions` werken via een MATERIALIZED CTE op de locatieregels (was 3–12 s, nu 20–300 ms).
 - Idee als het zondag weer krap wordt: de seen-registratie van de weeksync (2,2 mln inserts per week) zuiniger maken, of Mini-instance (+15 credits/maand).
 
+### Hoofd- en extra locatie (26-10)
+- Kolom `inventory_items.location_kind`: `hoofd` (Easy-Trade `Vrd_Loc_Picking`) of `extra` (`Vrd_Loc_Extra`). Beide Qlik-apps sturen `location_kind` mee; tabellen **SyncLocaties v3** (`a29ae621-2669-44df-ad32-50050a4e809d`) en **SyncAlles v3** (`a4e93e5b-6e68-4ed2-84c4-afff6972c864`); de automatiseringen gebruiken die (dagsync bevestigd).
+- `set_article_location` (Inboeken en "Locatie wijzigen") wijzigt alleen de hoofdlocatie; extra locaties blijven. Is de nieuwe locatie al een regel van het artikel, dan wordt die de hoofdlocatie en vervalt de oude.
+- Inboeken: een scan op een bestaande locatie van het artikel (hoofd of extra) is "ongewijzigd".
+- `search_inventory_normalized` geeft `location_kind` terug; het zoekscherm toont de hoofdlocatie groot ("Hoofdlocatie") met "Extra locatie" eronder.
+- `finish_located_sync` meldt een Easy-Trade-locatie die in de app ook bestaat (zoals de extra locatie) niet meer als verschil.
+- Let op: bestaat er een app-locatie voor een artikel, dan slaat de sync álle Easy-Trade-regels van dat artikel over tot Easy-Trade dezelfde hoofdlocatie meldt. Een nieuwe extra locatie in Easy-Trade komt dan pas daarna binnen.
+
 ## Openstaand
 1. Weeksync van zondag 01-11 controleren (check-in staat gepland).
 2. **Artikelnummers met komma's:** 12.092 rijen zoals `447,050` bestaan niet in Easy-Trade (ook niet zonder komma) en verdwijnen bij de eerste weeksync. Komma's in echte Easy-Trade-nummers (zoals `M20X1,5`) zijn wel geldig.
 3. 420 regels met locatie hebben geen EAN: zie de download "Locatie zonder EAN" in Beheer.
-4. Of de dagsync de nieuwe tabel `SyncLocaties v2` (met ean_code_2) gebruikt, is niet zeker: de update gaf een validatiefout bij het teruglezen. De weeksync stuurt ean_code_2 in elk geval mee. Controleer in Qlik Automate of blok `getStraightTableData` naar object `417fd54a-…` wijst.
-5. Eventueel: het soort locatie (picking / extra) uit Easy-Trade meesturen, zodat de picking-locatie bovenaan staat.
+4. (Opgelost 26-10: dagsync gebruikt tabel v3 met ean_code_2 en location_kind.)
